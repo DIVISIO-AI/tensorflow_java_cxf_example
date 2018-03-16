@@ -1,5 +1,7 @@
 package divisio.example.tensorflow.cxf;
-import java.nio.FloatBuffer;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
@@ -8,6 +10,7 @@ import javax.ws.rs.QueryParam;
 
 import org.tensorflow.SavedModelBundle;
 import org.tensorflow.Tensor;
+import org.tensorflow.Tensors;
 
 @Path("/tensorflow")
 public class TensorflowREST {
@@ -22,11 +25,28 @@ public class TensorflowREST {
 	}
 	
 	/**
-	 * Helper function to wrap a single float in a tensor
+	 * wraps a single float in a tensor
+	 * @param f the float to wrap
+	 * @return a tensor containing the float
 	 */
-	private static Tensor<Float> toTensor(final float f) {
-		return Tensor.create(new long[] {1}, 
-				FloatBuffer.wrap(new float[] {f}));
+	private static Tensor<Float> toTensor(final float f, final Collection<Tensor<?>> tensorsToClose) {
+		final Tensor<Float> t = Tensors.create(f);
+		if (tensorsToClose != null) {
+			tensorsToClose.add(t);
+		}
+		return t;
+	}		
+	
+	private static void closeTensors(final Collection<Tensor<?>> ts) {		
+		for (final Tensor<?> t : ts) {
+			try {
+				t.close();
+			} catch (final Exception e) {
+				System.err.println("Error closing Tensor.");
+				e.printStackTrace();
+			}
+		}
+		ts.clear();
 	}
 
     @GET
@@ -46,28 +66,33 @@ public class TensorflowREST {
     		                       @QueryParam("alcohol") float alcohol 
     		                       ) 
     {
-		//run a session just like in python
-    		final Tensor<?> result = bundle.session().runner()
-		.feed("wine_type"           , toTensor(wineType))
-		.feed("fixed_acidity"       , toTensor(fixedAcidity))
-		.feed("volatile_acidity"    , toTensor(volatileAcidity))
-		.feed("citric_acid"         , toTensor(citricAcid))
-		.feed("residual_sugar"      , toTensor(residualSugar))
-		.feed("chlorides"           , toTensor(chlorides))
-		.feed("free_sulfur_dioxide" , toTensor(freeSulfurDioxide))
-		.feed("total_sulfur_dioxide", toTensor(totalSulfurDioxide))
-		.feed("density"             , toTensor(density))
-		.feed("ph"                  , toTensor(ph))
-		.feed("sulphates"           , toTensor(sulphates))
-		.feed("alcohol"             , toTensor(alcohol))
-		//use the saved model CLI shipping with tensorflow to determine the name
-		//of the result node
-		.fetch("dnn/head/logits:0")
-		.run()
-		.get(0);
-		
-		float[][] resultValues = (float[][]) result.copyTo(new float[1][1]);		
-        return Float.toString(resultValues[0][0]);
+    		final List<Tensor<?>> tensorsToClose = new ArrayList<Tensor<?>>(20);
+    		
+    		try {
+			//run a session just like in python
+	    		final List<Tensor<?>> results = bundle.session().runner()
+			.feed("wine_type"           , toTensor(wineType, tensorsToClose))
+			.feed("fixed_acidity"       , toTensor(fixedAcidity, tensorsToClose))
+			.feed("volatile_acidity"    , toTensor(volatileAcidity, tensorsToClose))
+			.feed("citric_acid"         , toTensor(citricAcid, tensorsToClose))
+			.feed("residual_sugar"      , toTensor(residualSugar, tensorsToClose))
+			.feed("chlorides"           , toTensor(chlorides, tensorsToClose))
+			.feed("free_sulfur_dioxide" , toTensor(freeSulfurDioxide, tensorsToClose))
+			.feed("total_sulfur_dioxide", toTensor(totalSulfurDioxide, tensorsToClose))
+			.feed("density"             , toTensor(density, tensorsToClose))
+			.feed("ph"                  , toTensor(ph, tensorsToClose))
+			.feed("sulphates"           , toTensor(sulphates, tensorsToClose))
+			.feed("alcohol"             , toTensor(alcohol, tensorsToClose))
+			//use the saved model CLI shipping with tensorflow to determine the name
+			//of the result node
+			.fetch("dnn/head/logits:0")
+			.run();
+	    		tensorsToClose.addAll(results);
+			float[][] resultValues = (float[][]) results.get(0).copyTo(new float[1][1]);
+			return Float.toString(resultValues[0][0]);
+    		} finally {
+    			closeTensors(tensorsToClose);
+    		}        
     }
 }
 
